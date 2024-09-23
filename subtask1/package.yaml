@@ -1,0 +1,60 @@
+name: vimhs
+version: 0.1.0.0
+github: "Jitendra2603/vimhs"
+license: None
+author: "Jitendra Prajapati"
+maintainer: "jitendra26@aol.com"
+copyright: "2024 Jitendra"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+description: Please see the README on GitHub at <https://github.com/Jitendra2603/vimhs#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- text
+- containers
+- mtl
+- transformers
+- brick
+- vty
+- text-zipper
+- directory
+- filepath
+- time
+- fsnotify
+- yaml
+- aeson
+- bytestring
+- vector
+- megaparsec
+- parser-combinators
+
+library:
+  source-dirs: src
+
+executables:
+  advanced-editor-exe:
+    main: Main.hs
+    source-dirs: app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - advanced-editor
+
+tests:
+  advanced-editor-test:
+    main: Spec.hs
+    source-dirs: test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - advanced-editor
+    - hspec
+    - QuickCheck
