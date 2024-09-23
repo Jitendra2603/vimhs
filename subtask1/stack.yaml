@@ -1,0 +1,22 @@
+resolver: lts-18.28
+
+packages:
+- .
+
+extra-deps:
+- text-zipper-0.10.1
+- vty-5.33
+- brick-0.67
+- config-ini-0.2.4.0
+- word-wrap-0.5
+
+flags: {}
+
+extra-package-dbs: []
+
+system-ghc: true
+
+require-stack-version: ">= 2.7.0"
+
+ghc-options:
+  "$everything": -haddock
