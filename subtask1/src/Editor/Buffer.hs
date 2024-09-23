@@ -1,107 +1,115 @@
 {-# LANGUAGE OverloadedStrings #-}
-
 module Editor.Buffer
-    ( Buffer(..)
+    ( Buffer
     , newBuffer
     , insertChar
     , deleteChar
+    , moveCursor
+    , getLine
+    , getContent
+    , getCursor
+    , replaceRange
     , insertLine
     , deleteLine
-    , moveCursor
-    , getCursorPosition
-    , getLines
-    , replaceLines
+    , joinLine
     , undo
     , redo
     ) where
 
 import qualified Data.Text as T
-import qualified Data.Vector as V
-import Data.Sequence (Seq, (|>), ViewL(..), (<|))
+import qualified Data.Text.Zipper as Z
+import Editor.Cursor (Cursor)
+import Data.Sequence (Seq, (|>), ViewL(..), viewl)
 import qualified Data.Sequence as Seq
 
 data Buffer = Buffer
-    { bufferLines :: V.Vector T.Text
-    , cursorRow :: !Int
-    , cursorCol :: !Int
-    , undoStack :: Seq Buffer
-    , redoStack :: Seq Buffer
+    { bufferContent :: Z.TextZipper
+    , bufferCursor :: Cursor
+    , undoStack :: Seq (Z.TextZipper, Cursor)
+    , redoStack :: Seq (Z.TextZipper, Cursor)
     }
 
 newBuffer :: T.Text -> Buffer
-newBuffer content =
-    Buffer (V.fromList $ T.lines content) 0 0 Seq.empty Seq.empty
+newBuffer content = Buffer
+    { bufferContent = Z.fromText content
+    , bufferCursor = (0, 0)
+    , undoStack = Seq.empty
+    , redoStack = Seq.empty
+    }
+
+saveState :: Buffer -> Buffer
+saveState buf = buf
+    { undoStack = undoStack buf |> (bufferContent buf, bufferCursor buf)
+    , redoStack = Seq.empty
+    }
 
 insertChar :: Char -> Buffer -> Buffer
-insertChar c buf@(Buffer lines row col undoS redoS) =
-    let (before, after) = T.splitAt col (lines V.! row)
-        newLine = before `T.snoc` c `T.append` after
-        newLines = lines V.// [(row, newLine)]
-    in pushUndo $ buf { bufferLines = newLines, cursorCol = col + 1, redoStack = Seq.empty }
+insertChar c buf = saveState $ buf
+    { bufferContent = Z.insertChar c (bufferContent buf)
+    , bufferCursor = (fst (bufferCursor buf), snd (bufferCursor buf) + 1)
+    }
 
 deleteChar :: Buffer -> Buffer
-deleteChar buf@(Buffer lines row col undoS redoS)
-    | col > 0 =
-        let (before, after) = T.splitAt (col - 1) (lines V.! row)
-            newLine = before `T.append` after
-            newLines = lines V.// [(row, newLine)]
-        in pushUndo $ buf { bufferLines = newLines, cursorCol = col - 1, redoStack = Seq.empty }
-    | row > 0 =
-        let prevLine = lines V.! (row - 1)
-            currLine = lines V.! row
-            newLine = prevLine `T.append` currLine
-            newLines = V.take (row - 1) lines V.++ V.singleton newLine V.++ V.drop (row + 1) lines
-        in pushUndo $ buf { bufferLines = newLines, cursorRow = row - 1, cursorCol = T.length prevLine, redoStack = Seq.empty }
-    | otherwise = buf
+deleteChar buf = saveState $ buf
+    { bufferContent = Z.deleteChar (bufferContent buf)
+    , bufferCursor = (fst (bufferCursor buf), max 0 (snd (bufferCursor buf) - 1))
+    }
 
-insertLine :: Buffer -> Buffer
-insertLine buf@(Buffer lines row col undoS redoS) =
-    let (before, after) = T.splitAt col (lines V.! row)
-        newLines = V.take row lines
-               V.++ V.fromList [before, after]
-               V.++ V.drop (row + 1) lines
-    in pushUndo $ buf { bufferLines = newLines, cursorRow = row + 1, cursorCol = 0, redoStack = Seq.empty }
+moveCursor :: (Int, Int) -> Buffer -> Buffer
+moveCursor (row, col) buf = buf
+    { bufferContent = Z.moveCursor row col (bufferContent buf)
+    , bufferCursor = (row, col)
+    }
 
-deleteLine :: Buffer -> Buffer
-deleteLine buf@(Buffer lines row col undoS redoS)
-    | V.length lines > 1 =
-        let newLines = V.take row lines V.++ V.drop (row + 1) lines
-            newRow = if row >= V.length newLines then V.length newLines - 1 else row
-            newCol = min col (T.length (newLines V.! newRow) - 1)
-        in pushUndo $ buf { bufferLines = newLines, cursorRow = newRow, cursorCol = newCol, redoStack = Seq.empty }
-    | otherwise = buf
+getLine :: Int -> Buffer -> T.Text
+getLine n buf = Z.currentLine $ Z.moveCursor n 0 (bufferContent buf)
 
-moveCursor :: (Int -> Int -> (Int, Int)) -> Buffer -> Buffer
-moveCursor f buf@(Buffer lines row col _ _) =
-    let (newRow, newCol) = f row col
-        maxRow = V.length lines - 1
-        maxCol = T.length (lines V.! newRow)
-    in buf { cursorRow = max 0 $ min maxRow newRow
-           , cursorCol = max 0 $ min maxCol newCol
-           }
+getContent :: Buffer -> T.Text
+getContent = Z.getText . bufferContent
 
-getCursorPosition :: Buffer -> (Int, Int)
-getCursorPosition (Buffer _ row col _ _) = (row, col)
+getCursor :: Buffer -> Cursor
+getCursor = bufferCursor
 
-getLines :: Buffer -> [T.Text]
-getLines (Buffer lines _ _ _ _) = V.toList lines
+replaceRange :: (Int, Int) -> (Int, Int) -> T.Text -> Buffer -> Buffer
+replaceRange (startRow, startCol) (endRow, endCol) newText buf = saveState $ buf
+    { bufferContent = Z.replaceRange startRow startCol endRow endCol newText (bufferContent buf)
+    , bufferCursor = (startRow, startCol + T.length newText)
+    }
 
-replaceLines :: [T.Text] -> Buffer -> Buffer
-replaceLines newLines buf =
-    pushUndo $ buf { bufferLines = V.fromList newLines, cursorRow = 0, cursorCol = 0, redoStack = Seq.empty }
+insertLine :: Int -> T.Text -> Buffer -> Buffer
+insertLine row text buf = saveState $ buf
+    { bufferContent = Z.insertLine row text (bufferContent buf)
+    , bufferCursor = (row + 1, 0)
+    }
 
-pushUndo :: Buffer -> Buffer
-pushUndo buf@(Buffer _ _ _ undoS _) =
-    buf { undoStack = undoS |> buf }
+deleteLine :: Int -> Buffer -> Buffer
+deleteLine row buf = saveState $ buf
+    { bufferContent = Z.deleteLine row (bufferContent buf)
+    , bufferCursor = (max 0 (row - 1), 0)
+    }
+
+joinLine :: Int -> Buffer -> Buffer
+joinLine row buf = saveState $ buf
+    { bufferContent = Z.joinLine row (bufferContent buf)
+    , bufferCursor = (row, T.length $ getLine row buf)
+    }
 
 undo :: Buffer -> Buffer
-undo buf@(Buffer _ _ _ undoS redoS) =
-    case Seq.viewr undoS of
-        Seq.EmptyR -> buf
-        rest Seq.:> prev -> prev { undoStack = rest, redoStack = buf <| redoS }
+undo buf = case viewl (undoStack buf) of
+    EmptyL -> buf
+    (content, cursor) :< rest -> buf
+        { bufferContent = content
+        , bufferCursor = cursor
+        , undoStack = rest
+        , redoStack = (bufferContent buf, bufferCursor buf) |> redoStack buf
+        }
 
 redo :: Buffer -> Buffer
-redo buf@(Buffer _ _ _ undoS redoS) =
-    case Seq.viewl redoS of
-        EmptyL -> buf
-        next :< rest -> next { undoStack = undoS |> buf, redoStack = rest }
+redo buf = case viewl (redoStack buf) of
+    EmptyL -> buf
+    (content, cursor) :< rest -> buf
+        { bufferContent = content
+        , bufferCursor = cursor
+        , redoStack = rest
+        , undoStack = (bufferContent buf, bufferCursor buf) |> undoStack buf
+        }
