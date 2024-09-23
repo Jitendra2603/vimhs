@@ -36,7 +36,7 @@ library:
   source-dirs: src
 
 executables:
-  advanced-editor-exe:
+  vimhs-exe:
     main: Main.hs
     source-dirs: app
     ghc-options:
@@ -47,7 +47,7 @@ executables:
     - advanced-editor
 
 tests:
-  advanced-editor-test:
+  vimhs-test:
     main: Spec.hs
     source-dirs: test
     ghc-options:
@@ -58,3 +58,5 @@ tests:
     - advanced-editor
     - hspec
     - QuickCheck
+    - temporary
+    - directory
